@@ -33,6 +33,9 @@ regulation_list = [
 pwReset       = []
 # 保護済み
 protected     = []
+
+# -------------- 設定 -------------- #
+
 # IDリストファイルパス
 idlistPath    = "idlist.txt"
 # パスワードリセットファイルパス
@@ -44,9 +47,13 @@ proxylistPath = "proxylist.txt"
 # 最高スレッド数
 max_thread    = 3
 
+# ---------------------------------- #
+
 # プロキシリストの読み込み
 with open(proxylistPath, "r") as f:
-    proxylist = f.read().splitlines() # 一行ずつ
+    proxylist = f.read().splitlines()
+
+
 
 def thread(id, retry):
 
@@ -61,13 +68,10 @@ def thread(id, retry):
             br.set_handle_robots(False)
             br.addheaders = [("User-agent", "Opera/9.30 (Nintendo Wii; U; ; 2047-7; en)")]
 
-            # リンクを開く　タイムアウト10秒
+            # ------------------------------ スクレイピング ------------------------------ #
             br.open("https://twitter.com/account/begin_password_reset", timeout=10.0)
-            # フォーム選択
             br.select_form(action="/account/begin_password_reset")
-            # ユーザー名入力
             br["account_identifier"] = id
-            # 検索
             br.submit()
 
             html = BeautifulSoup(br.response().read(), "html.parser")
@@ -95,6 +99,7 @@ def thread(id, retry):
             print(willwritedata + "\n")
             pwReset.append(fullname + "," + willwritedata + "\n")
             print("--------------------------------")
+            # ----------------------------------------------------------------------------- #
 
         except KeyboardInterrupt:
             print("強制終了")
@@ -115,12 +120,13 @@ def thread(id, retry):
             for regulation in regulation_list:
                 if regulation in title:
                     print("規制")
-                    # - Torタスク終了
+
+                    # --- Torプロキシ変更 --- #
                     subprocess.run("taskkill /IM tor.exe /F")
                     print("--------------------------------")
-                    # - コマンドラインからtor呼び出し
                     subprocess.Popen("tor")
                     print()
+
                     # - 自分のIPアドレスを表示する
                     res = requests.get("http://inet-ip.info/ip", proxies=proxies)
                     print(res.text)
@@ -135,6 +141,8 @@ def thread(id, retry):
 
     else:
         print("5回試行しましたが実行できませんでした。")
+
+        # - Tor終了
         subprocess.run("taskkill /IM tor.exe /F")
 
         # ----------------------書き込み------------------------ #
@@ -148,6 +156,7 @@ def thread(id, retry):
         print("\n終了")
         input()
         exit()
+
 
 def main(ids, retry=5):
 

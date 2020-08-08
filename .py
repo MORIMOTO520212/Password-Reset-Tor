@@ -1,146 +1,140 @@
 from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
-from mechanize import Browser
-import subprocess
+import os
 import requests
 import socks
 import socket
 import time
 import sys
 
-keywords_list = ["Request help signing in to your account."]
-regulation_list = [
-    "Réinitialisation du mot de passe",
-    "Passwortrücksetzung",
-    "Wachtwoordherstel",
-    "Password Reset",
-    "パスワードをリセット",
-    "Restablecimiento de contraseña",
-    "Lösenordsåterställning",
-    "Resetowanie hasła",
-    "Salasanan nollaus",
-    "Сброс пароля",
-]
+# ~ フロー ~
+# idlist.txtからユーザーIDを読み込む
+# main関数実行　並列化
+# pwReset.txt, protect.txtに書き込む
 
-パスリセ = []
-保護済み = []
 
-with open("proxylist.txt") as f:
-    proxylist = f.read().splitlines()
+# パスワードリセット
+pwReset       = []
+# 保護済み
+protected     = []
 
-def get_proxies():
-    proxies = proxylist
-    return proxies
+# -------------- 設定 -------------- #
 
-proxArr = get_proxies()
+# IDリストファイルパス
+idlistPath    = "idlist.txt"
+# パスワードリセットファイルパス
+pwResetPath   = "pwReset.txt"
+# 保護済みファイルパス
+protectedPath = "protected.txt"
+# プロキシリストファイルパス
+proxylistPath = "proxylist.txt"
+# 最高スレッド数
+max_thread    = 3
+
+# ---------------------------------- #
+
+
+
+def thread(id, retry):
+
+    for _ in range(retry):
+
+        try:
+
+            socks.setdefaultproxy(socks.PROXY_TYPE_SOCKS5, "127.0.0.1", 9050)
+            socket.socket = socks.socksocket
+
+            br = Browser()
+            br.set_handle_robots(False)
+            br.addheaders = [("User-agent", "Opera/9.30 (Nintendo Wii; U; ; 2047-7; en)")]
+
+            # ------------------------------ スクレイピング ------------------------------ #
+            print("{} 処理".format(id))
+            # ----------------------------------------------------------------------------- #
+
+        except KeyboardInterrupt:
+            print("強制終了")
+            os.system("taskkill /IM tor.exe /F")
+
+            # ----------------------書き込み------------------------ #
+            print("書き込み処理")
+            # ----------------------------------------------------- #
+            print("\n終了")
+            input()
+            exit()
+
+        except TypeError:
+            for regulation in regulation_list:
+                if regulation in title:
+                    print("規制")
+
+                    # --- Torプロキシ変更 --- #
+                    os.system("taskkill /IM tor.exe /F")
+                    print("--------------------------------")
+                    os.system("tor")
+                    print()
+
+                    # - 自分のIPアドレスを表示する
+                    res = requests.get("http://inet-ip.info/ip", proxies=proxies)
+                    print(res.text)
+                    print()
+                    pass
+                pass
+            break
+
+        # - 正常終了後、ループを抜ける
+        else:
+            break
+
+    else:
+        print("5回試行しましたが実行できませんでした。")
+
+        # - Tor終了
+        os.system("taskkill /IM tor.exe /F")
+
+        # ----------------------書き込み------------------------ #
+        print("書き込み処理")
+        # ----------------------------------------------------- #
+
+        print("\n終了")
+        input()
+        exit()
+
 
 def main(ids, retry=5):
 
+    # スレッド設定
+    th = ThreadPoolExecutor(max_workers=max_thread)
+
+    # - コマンドラインからtor呼び出し
+    os.system("tor")
+
+    # - プロキシ設定
+    proxies = {"http": "socks5://127.0.0.1:9050", "https": "socks5://127.0.0.1:9050"}
+
+    # - 自分のIPを表示
+    res = requests.get("http://inet-ip.info/ip", proxies=proxies)
+    print(res.text)
+    print()
+
     for id in ids:
+        # スレッド実行
+        th.submit(thread, id, retry)
+    th.shutdown()
 
-        for proxy in proxArr:
-
-            proxies = {"http": proxy, "https": proxy}
-
-            res = requests.get("http://inet-ip.info/ip", proxies=proxies)
-            print("--------------------------------")
-            print()
-            print(res.text)
-            
-            for i in range(retry):
-
-                try:
-                    br = Browser()
-                    br.set_handle_robots(False)
-                    br.addheaders = [
-                        ("User-agent", "Opera/9.30 (Nintendo Wii; U; ; 2047-7; en)")
-                    ]
-                    br.set_proxies(proxies=proxies)
-
-                    br.open(
-                        "https://twitter.com/account/begin_password_reset", timeout=10.0
-                    )
-                    br.select_form(action="/account/begin_password_reset")
-                    br["account_identifier"] = id
-                    br.submit()
-
-                    html = BeautifulSoup(br.response().read(), "html.parser")
-                    title = html.find("title").text
-                    body = html.find("body").text
-
-                    for keyword in keywords_list:
-                        if keyword in title:
-
-                            print("パスリセメソッド不在")
-                            break
-
-                    soupobject = BeautifulSoup(br.response().read(), "html.parser")
-                    mailaddresses = soupobject.find_all("strong")
-                    fullname = soupobject.find_all("b")
-                    willwritedata = id
-
-                    for mailaddress in mailaddresses:
-                        willwritedata += "," + mailaddress.text
-
-                    for fullname in fullname:
-                        fullname = fullname.text
-
-                    print(fullname)
-                    print(willwritedata + "\n")
-                    パスリセ.append(fullname + "," + willwritedata + "\n")
-                    print("--------------------------------")
-
-                except KeyboardInterrupt:
-                    print("強制終了")
-
-                    with open("パスリセ.txt", "w", encoding="utf-8") as f:
-                        f.write("\n".join(パスリセ))
-
-                    with open("保護済み.txt", "w", encoding="utf-8") as f:
-                        f.write("\n".join(保護済み))
-
-                    print("\n終了")
-                    input()
-                    exit()
-
-                except TypeError:
-                    for regulation in regulation_list:
-                        if regulation in title:
-                            print("規制")
-                            print("--------------------------------")
-                            pass
-                        pass
-                    break
-
-                else:
-                    break
-
-            else:
-                print("5回試行しましたが実行できませんでした。")
-
-                with open("パスリセ.txt", "w", encoding="utf-8") as f:
-                    f.write("\n".join(パスリセ))
-
-                with open("保護済み.txt", "w", encoding="utf-8") as f:
-                    f.write("\n".join(保護済み))
-
-                print("\n終了")
-                input()
-                exit()
-
-
-with open("idlist.txt") as f:
+# IDリスト読み込み
+with open(idlistPath, "r") as f:
     ids = f.read().splitlines()
 
-threads = []
+# 関数実行
+main(ids, retry=5)
 
-with ThreadPoolExecutor(max_workers=16) as pool:
-    threads = [br for br in pool.map(main, ids)]
+# ----------------------書き込み------------------------ #
+print("書き込み処理")
+# ----------------------------------------------------- #
 
-with open("パスリセ.txt", "w", encoding="utf-8") as f:
-    f.write("\n".join(パスリセ))
-with open("保護済み.txt", "w", encoding="utf-8") as f:
-    f.write("\n".join(保護済み))
+# Torタスク終了
+os.system("taskkill /IM tor.exe /F")
 
 print("\n終了")
 input()
