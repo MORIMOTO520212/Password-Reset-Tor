@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from mechanize import Browser
 import subprocess
 import requests
+import base64
 import socks
 import socket
 import time
@@ -13,7 +14,32 @@ import sys
 # main関数実行　並列化
 # pwReset.txt, protect.txtに書き込む
 
+# NOTE #
+# プロキシのタイムアウト時間は5分
+# proxy_tester.pyの中にパスリセTor.pyを入れた感じ。
+# 最終手段 - 複数のラズパイで共有サーバーを使って複数のtorを実行するか、ハイパーバイザーでtorを複数実行する
+# inetip.infoにはVioletnorthが搭載されていてDDoS攻撃を防ぐために特定のIPは弾いています。
+
 keywords_list = ["Request help signing in to your account."]
+
+protect_list = [
+    "個人情報を確認してください",
+    "Verify your personal information",
+    "Gwirio eich gwybodaeth bersonol",
+    "Verifiziere Deine persönlichen Informationen.",
+]
+
+# エラーリスト
+error_list = [
+    "We hebben je account niet gevonden met deze informatie.",
+    "Wir konnten Deinen Account mit diesen Angaben nicht finden.",
+    "Potrzebujemy tej informacji, aby znaleźć Twoje konto.",
+    "Nous n'avons pas trouvé votre compte avec ces informations.",
+    "入力された情報ではアカウントが見つかりませんでした。",
+    "We couldn't find your account with that information.",
+    "VNie znaleźliśmy Twojego konta z tą informacją.",
+    "No pudimos encontrar tu cuenta con esa información.",
+]
 
 # 規制リスト
 regulation_list = [
@@ -55,7 +81,7 @@ with open(proxylistPath, "r") as f:
 
 
 
-def thread(id, retry):
+def thread(id, retry=5):
 
     for _ in range(retry):
 
@@ -78,32 +104,63 @@ def thread(id, retry):
             title = html.find("title").text
             body = html.find("body").text
 
-            for keyword in keywords_list:
-                if keyword in title:
-
-                    print("パスリセメソッド不在")
+            for error in error_list:
+                if error in body:
+                    print("\n{},入力された情報ではアカウントが見つかりませんでした。".format(id))
+                    print("\n--------------------------------")
                     break
+                else:
+                    for keyword in keywords_list:
+                        if keyword in title:
+                            print("\n{},パスリセメソッド不在".format(id))
+                            print("\n--------------------------------")
+                            break
 
-            soupobject = BeautifulSoup(br.response().read(), "html.parser")
-            mailaddresses = soupobject.find_all("strong")
-            fullname = soupobject.find_all("b")
-            willwritedata = id
+                    else:
+                        for protect in protect_list:
+                            if protect in body:
+                                print("\n{},保護済み".format(id))
+                                print("\n--------------------------------")
+                                break
+                        else:
+                            soupobject = BeautifulSoup(br.response().read(), "html.parser")
+                            mailaddresses = soupobject.find_all("strong")
+                            fullname = soupobject.find_all("b")
 
-            for mailaddress in mailaddresses:
-                willwritedata += "," + mailaddress.text
+                            if mailaddresses == []:
+                                print("\n" + id + ",規制\n")
+                                subprocess.run("taskkill /IM tor.exe /F")
+                                print("\n--------------------------------")
+                                subprocess.Popen("tor")
+                                res = requests.get(
+                                    "http://inet-ip.info/ip", proxies=proxies
+                                )
+                                print("\n" + res.text)
+                                break
 
-            for fullname in fullname:
-                fullname = fullname.text
+                            else:
+                                willwritedata = id
 
-            print(fullname)
-            print(willwritedata + "\n")
-            pwReset.append(fullname + "," + willwritedata + "\n")
-            print("--------------------------------")
+                                for mailaddress in mailaddresses:
+                                    willwritedata += "," + mailaddress.text
+
+                                for fullname in fullname:
+                                    fullname = fullname.text
+
+                                print("\n" + fullname)
+                                print(willwritedata + "\n")
+                                パスリセ.append(fullname + "," + willwritedata + "\n")
+                                print("--------------------------------")
+                            break
+                        break
+                    break
+                break
+            break
             # ----------------------------------------------------------------------------- #
 
         except KeyboardInterrupt:
             print("強制終了")
-            subprocess.run("taskkill /IM tor.exe /F")
+            #subprocess.run("taskkill /IM tor.exe /F")
 
             # ----------------------書き込み------------------------ #
             with open(pwResetPath, "w", encoding="utf-8") as f:
@@ -115,32 +172,6 @@ def thread(id, retry):
             print("\n終了")
             input()
             exit()
-
-        except TypeError:
-            for regulation in regulation_list:
-                if regulation in title:
-                    print("規制")
-
-                    # --- Torプロキシ変更 --- #
-                    subprocess.run("taskkill /IM tor.exe /F")
-                    print("--------------------------------")
-                    subprocess.Popen("tor")
-                    print()
-
-                    # - 自分のIPアドレスを表示する
-                    res = requests.get("http://inet-ip.info/ip", proxies=proxies)
-                    print(res.text)
-                    print()
-                    pass
-                pass
-            break
-
-        # - 正常終了後、ループを抜ける
-        else:
-            break
-
-    else:
-        print("5回試行しましたが実行できませんでした。")
 
         # - Tor終了
         subprocess.run("taskkill /IM tor.exe /F")
@@ -163,13 +194,11 @@ def main(ids, retry=5):
     # スレッド設定
     th = ThreadPoolExecutor(max_workers=max_thread)
 
-    # - コマンドラインからtor呼び出し
+    # - tor呼び出し
     subprocess.Popen("tor")
 
-    # - プロキシ設定
-    proxies = {"http": "socks5://127.0.0.1:9050", "https": "socks5://127.0.0.1:9050"}
-
     # - 自分のIPを表示
+    proxies = {"http": "socks5://127.0.0.1:9050", "https": "socks5://127.0.0.1:9050"}
     res = requests.get("http://inet-ip.info/ip", proxies=proxies)
     print(res.text)
     print()
@@ -193,7 +222,7 @@ with open(protectedPath, "w", encoding="utf-8") as f:
     f.write("\n".join(protected))
 # ----------------------------------------------------- #
 
-# Torタスク終了
+# Tor終了
 subprocess.run("taskkill /IM tor.exe /F")
 
 print("\n終了")
