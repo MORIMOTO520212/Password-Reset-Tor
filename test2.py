@@ -1,9 +1,19 @@
 import requests, base64
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
-req = requests.get("http://free-proxy.cz/ja/proxylist/main/1")
 
-html = BeautifulSoup(req.text, "html.parser")
+# ---------- ウィンドウを閉じた状態でChromeでウェブページを開きます ボット回避のため ---------- #
+options = Options()
+options.add_argument('--headless')
+driver = webdriver.Chrome(chrome_options=options)
+driver.get('http://free-proxy.cz/ja/proxylist/main/1')
+
+html = BeautifulSoup(driver.page_source, "html.parser")
+driver.quit()
+# ---------------------------------------------------------------------------------------- #
+
 tr = html.find_all("tr")
 
 for _tr in tr:
