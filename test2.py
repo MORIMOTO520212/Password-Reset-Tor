@@ -10,9 +10,9 @@ for _tr in tr:
     address = ''
     port    = ''
     td = _tr.find_all("td")
-    script = td[0].find("script").get_text()
-    span   = td[1].find("span").get_text()
-    if "Base64.decode" in script:
+    if 2 < len(td):
+        port    = td[1].find("span").get_text()
+        script  = td[0].find("script").string
         _base64 = script.replace("document.write(Base64.decode(\"", "").replace("\"))", "")
-        address = base64.b64decode(_base64)
-        print("Address:",address+span)
+        address = base64.b64decode(_base64).decode()
+        print("Address: {}:{}".format(address, port))
